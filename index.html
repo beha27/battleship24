@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Морской Бой 10x10 (PvP & PvE)</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <!-- PeerJS for P2P PvP -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        .ship-cell { transition: background-color 0.2s, transform 0.1s; }
+        .ship-cell:hover { transform: scale(1.05); }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen font-sans flex flex-col items-center justify-between p-4">
+
+    <!-- Header -->
+    <header class="w-full max-w-4xl flex flex-col md:flex-row items-center justify-between py-4 border-b border-slate-700 mb-6">
+        <h1 class="text-3xl font-black tracking-wider text-cyan-400 flex items-center gap-2">
+            🚢 МОРСКОЙ БОЙ <span class="text-xs bg-cyan-900 text-cyan-200 px-2 py-1 rounded-full border border-cyan-700">10×10</span>
+        </h1>
+        <div id="status-bar" class="text-sm font-medium text-slate-300 mt-2 md:mt-0 bg-slate-800 px-4 py-2 rounded-lg border border-slate-700 shadow-inner">
+            Главное меню: выберите режим игры
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="w-full max-w-4xl flex-1 flex flex-col items-center justify-center relative">
+
+        <!-- Overlay Modal for Win/Loss End Game Screen -->
+        <div id="modal-gameover" class="hidden absolute inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div class="bg-slate-800 border border-slate-700 rounded-2xl p-8 max-w-md w-full text-center shadow-2xl flex flex-col items-center gap-4">
+                <h2 id="modal-title" class="text-3xl font-black text-cyan-400">Победа!</h2>
+                <p id="modal-text" class="text-slate-300 text-base">Вы успешно потопили весь флот противника!</p>
+                <button onclick="backToMenu()" class="w-full py-3 mt-2 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-xl shadow-lg transition duration-200">
+                    Вернуться в главное меню
+                </button>
+            </div>
+        </div>
+
+        <!-- 1. Main Menu Screen (3 buttons: Bot, Create Room, Join Room) -->
+        <div id="screen-menu" class="flex flex-col items-center gap-4 w-full max-w-md bg-slate-800 p-8 rounded-2xl border border-slate-700 shadow-2xl">
+            <h2 class="text-xl font-bold text-slate-200 mb-2">Выберите режим боя</h2>
+            <button onclick="startGameMode('pve')" class="w-full py-3 px-6 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-xl shadow-lg transition duration-200 flex items-center justify-center gap-2">
+                🤖 Играть против Бота
+            </button>
+            <button onclick="openCreateRoomScreen()" class="w-full py-3 px-6 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow-lg transition duration-200 flex items-center justify-center gap-2">
+                🏠 Создать комнату (PvP)
+            </button>
+            <button onclick="openJoinRoomScreen()" class="w-full py-3 px-6 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow-lg transition duration-200 flex items-center justify-center gap-2">
+                🔑 Войти в комнату (PvP)
+            </button>
+        </div>
+
+        <!-- 1.1. Create Room Screen -->
+        <div id="screen-create-room" class="hidden flex flex-col items-center gap-4 w-full max-w-md bg-slate-800 p-8 rounded-2xl border border-slate-700 shadow-2xl">
+            <h2 class="text-xl font-bold text-slate-200 mb-2">Создание комнаты</h2>
+            <p class="text-sm text-slate-300 text-center">Ваш ID комнаты для друга:</p>
+            <div id="my-peer-id-display" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-cyan-400 font-mono text-center text-sm select-all">Генерация ID...</div>
+            <button onclick="copyPeerId()" class="w-full py-2 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded-xl text-sm transition">Скопировать ID</button>
+            <div id="room-status" class="text-sm text-amber-300 font-medium text-center">Ожидание подключения друга...</div>
+            <button onclick="backToMenu()" class="text-sm text-slate-400 hover:text-slate-200 mt-2 underline">Назад в меню</button>
+        </div>
+
+        <!-- 1.2. Join Room Screen -->
+        <div id="screen-join-room" class="hidden flex flex-col items-center gap-4 w-full max-w-md bg-slate-800 p-8 rounded-2xl border border-slate-700 shadow-2xl">
+            <h2 class="text-xl font-bold text-slate-200 mb-2">Подключение к комнате</h2>
+            <input type="text" id="peer-id-input" placeholder="Введите ID комнаты друга" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-slate-100 focus:outline-none focus:border-cyan-500 text-sm">
+            <button onclick="connectToRoom()" class="w-full py-3 px-6 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl shadow-lg transition duration-200">
+                Подключиться
+            </button>
+            <button onclick="backToMenu()" class="text-sm text-slate-400 hover:text-slate-200 mt-2 underline">Назад в меню</button>
+        </div>
+
+        <!-- 2. Placement Screen -->
+        <div id="screen-placement" class="hidden flex flex-col items-center gap-6 w-full">
+            <div class="flex flex-col md:flex-row gap-8 items-center justify-center w-full">
+                <div class="flex flex-col items-center">
+                    <h3 class="text-lg font-bold mb-3 text-cyan-300">Расстановка кораблей (10×10)</h3>
+                    <div id="placement-board" class="grid grid-cols-10 gap-1 bg-slate-900 p-3 rounded-xl border border-slate-700 shadow-xl"></div>
+                </div>
+                <div class="flex flex-col gap-4 bg-slate-800 p-6 rounded-2xl border border-slate-700 w-full md:w-80 shadow-xl">
+                    <h4 class="font-bold text-slate-300">Флот (по 1 шт каждого):</h4>
+                    <ul class="text-sm space-y-2 text-slate-300">
+                        <li id="fleet-4" class="flex justify-between items-center bg-slate-900/60 p-2 rounded border border-slate-700"><span>4-палубный</span> <span class="font-bold text-cyan-400">1 шт.</span></li>
+                        <li id="fleet-3" class="flex justify-between items-center bg-slate-900/60 p-2 rounded border border-slate-700"><span>3-палубный</span> <span class="font-bold text-cyan-400">1 шт.</span></li>
+                        <li id="fleet-2" class="flex justify-between items-center bg-slate-900/60 p-2 rounded border border-slate-700"><span>2-палубный</span> <span class="font-bold text-cyan-400">1 шт.</span></li>
+                        <li id="fleet-1" class="flex justify-between items-center bg-slate-900/60 p-2 rounded border border-slate-700"><span>1-палубный</span> <span class="font-bold text-cyan-400">1 шт.</span></li>
+                    </ul>
+                    <div class="flex gap-2 mt-4">
+                        <button onclick="rotateShip()" class="flex-1 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm font-bold transition">Поворот</button>
+                        <button onclick="autoDeploy()" class="flex-1 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm font-bold transition">Случайно</button>
+                    </div>
+                    <button onclick="resetPlacement()" class="w-full py-2 bg-rose-900/40 hover:bg-rose-900/60 text-rose-300 border border-rose-700 rounded-lg text-sm font-bold transition">Сбросить</button>
+                    <button id="btn-start-battle" onclick="finishPlacement()" disabled class="w-full py-3 bg-emerald-600/40 text-slate-400 cursor-not-allowed font-bold rounded-xl transition shadow-lg">Готов к бою</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. Battle Screen -->
+        <div id="screen-battle" class="hidden flex flex-col items-center gap-6 w-full">
+            <div class="flex flex-col lg:flex-row gap-8 items-center justify-center w-full">
+                <div class="flex flex-col items-center">
+                    <h3 class="text-sm font-bold text-slate-400 mb-2">Ваш флот</h3>
+                    <div id="player-battle-board" class="grid grid-cols-10 gap-1 bg-slate-900 p-3 rounded-xl border border-slate-700 shadow-xl pointer-events-none"></div>
+                </div>
+                <div class="flex flex-col items-center">
+                    <h3 class="text-sm font-bold text-slate-400 mb-2">Поле противника</h3>
+                    <div id="enemy-battle-board" class="grid grid-cols-10 gap-1 bg-slate-900 p-3 rounded-xl border border-slate-700 shadow-xl"></div>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Footer / Credits -->
+    <footer class="w-full max-w-4xl text-center py-4 border-t border-slate-700 text-xs text-slate-500 mt-6">
+        Морской Бой 10×10 &bull; HTML5 / Tailwind / JavaScript / PeerJS
+    </footer>
+
+    <!-- Game Logic Script -->
+    <script>
+        const BOARD_SIZE = 10;
+        const SHIP_TYPES = [4, 3, 2, 1];
+        
+        let gameState = 'menu';
+        let gameMode = 'pve'; // 'pve' or 'pvp'
+        let currentShipIndex = 0;
+        let shipOrientation = 'horizontal';
+
+        let playerBoard = makeEmptyBoard();
+        let enemyBoard = makeEmptyBoard();
+        let playerShips = [];
+        let enemyShips = [];
+
+        let isMyTurn = true;
+        let peer = null;
+        let conn = null;
+        let isHost = false;
+
+        let myReady = false;
+        let enemyReady = false;
+
+        function makeEmptyBoard() {
+            return Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(0));
+        }
+
+        function showScreen(screenId) {
+            ['screen-menu', 'screen-create-room', 'screen-join-room', 'screen-placement', 'screen-battle'].forEach(id => {
+                document.getElementById(id).classList.add('hidden');
+            });
+            document.getElementById(screenId).classList.remove('hidden');
+        }
+
+        function setStatus(text) {
+            document.getElementById('status-bar').innerText = text;
+        }
+
+        function showGameOverModal(title, text) {
+            gameState = 'over';
+            document.getElementById('modal-title').innerText = title;
+            document.getElementById('modal-text').innerText = text;
+            document.getElementById('modal-gameover').classList.remove('hidden');
+        }
+
+        function backToMenu() {
+            document.getElementById('modal-gameover').classList.add('hidden');
+            if (peer) {
+                peer.destroy();
+                peer = null;
+                conn = null;
+            }
+            gameState = 'menu';
+            showScreen('screen-menu');
+            setStatus('Главное меню: выберите режим игры');
+        }
+
+        function startGameMode(mode) {
+            gameMode = mode;
+            currentShipIndex = 0;
+            playerBoard = makeEmptyBoard();
+            playerShips = [];
+            myReady = false;
+            enemyReady = false;
+            
+            showScreen('screen-placement');
+            renderPlacementBoard();
+            updateFleetUI();
+            
+            const btnStart = document.getElementById('btn-start-battle');
+            btnStart.disabled = true;
+            btnStart.innerText = 'Готов к бою';
+            btnStart.className = 'w-full py-3 bg-emerald-600/40 text-slate-400 cursor-not-allowed font-bold rounded-xl transition shadow-lg';
+            
+            setStatus('Расставьте свой флот на поле (по 1 кораблю каждого размера)');
+        }
+
+        // --- PvP PeerJS Integration ---
+        function initPeer() {
+            if (peer) return;
+            peer = new Peer();
+            
+            peer.on('open', (id) => {
+                document.getElementById('my-peer-id-display').innerText = id;
+            });
+
+            peer.on('connection', (connection) => {
+                conn = connection;
+                isHost = true;
+                setupConnectionHandlers();
+                document.getElementById('room-status').innerText = 'Друг успешно подключился!';
+                setTimeout(() => {
+                    startGameMode('pvp');
+                }, 1000);
+            });
+        }
+
+        function openCreateRoomScreen() {
+            isHost = true;
+            showScreen('screen-create-room');
+            document.getElementById('my-peer-id-display').innerText = 'Генерация ID...';
+            document.getElementById('room-status').innerText = 'Ожидание подключения друга...';
+            initPeer();
+            setStatus('Создана комната. Передайте ID другу');
+        }
+
+        function copyPeerId() {
+            const idText = document.getElementById('my-peer-id-display').innerText;
+            navigator.clipboard.writeText(idText).then(() => {
+                setStatus('ID комнаты скопирован в буфер обмена!');
+            });
+        }
+
+        function openJoinRoomScreen() {
+            isHost = false;
+            showScreen('screen-join-room');
+            initPeer();
+            setStatus('Введите ID комнаты друга для подключения');
+        }
+
+        function connectToRoom() {
+            const remoteId = document.getElementById('peer-id-input').value.trim();
+            if (!remoteId) {
+                alert('Пожалуйста, введите ID комнаты!');
+                return;
+            }
+            setStatus('Подключение к комнате...');
+            conn = peer.connect(remoteId);
+            
+            conn.on('open', () => {
+                setupConnectionHandlers();
+                setStatus('Подключено к комнате! Расставьте флот');
+                startGameMode('pvp');
+            });
+
+            conn.on('error', (err) => {
+                alert('Ошибка соединения: ' + err);
+                setStatus('Ошибка подключения');
+            });
+        }
+
+        function setupConnectionHandlers() {
+            conn.on('data', (data) => {
+                handleNetworkData(data);
+            });
+            conn.on('close', () => {
+                alert('Соединение с противником разорвано.');
+                backToMenu();
+            });
+        }
+
+        function sendData(data) {
+            if (conn && conn.open) {
+                conn.send(data);
+            }
+        }
+
+        // --- Placement Logic ---
+        function renderPlacementBoard() {
+            const container = document.getElementById('placement-board');
+            container.innerHTML = '';
+            for (let r = 0; r < BOARD_SIZE; r++) {
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'w-7 h-7 md:w-8 md:h-8 rounded ship-cell cursor-pointer flex items-center justify-center border border-slate-700';
+                    cell.dataset.row = r;
+                    cell.dataset.col = c;
+                    
+                    if (playerBoard[r][c] === 1) {
+                        cell.classList.add('bg-cyan-600');
+                    } else {
+                        cell.classList.add('bg-slate-800', 'hover:bg-slate-700');
+                    }
+
+                    cell.addEventListener('click', () => handlePlacementClick(r, c));
+                    container.appendChild(cell);
+                }
+            }
+        }
+
+        function rotateShip() {
+            shipOrientation = shipOrientation === 'horizontal' ? 'vertical' : 'horizontal';
+            setStatus(`Поворот корабля: ${shipOrientation === 'horizontal' ? 'Горизонтально' : 'Вертикально'}`);
+        }
+
+        function canPlaceShip(board, size, row, col, orientation) {
+            for (let i = 0; i < size; i++) {
+                let r = row + (orientation === 'vertical' ? i : 0);
+                let c = col + (orientation === 'horizontal' ? i : 0);
+                if (r >= BOARD_SIZE || c >= BOARD_SIZE) return false;
+                if (board[r][c] !== 0) return false;
+
+                for (let dr = -1; dr <= 1; dr++) {
+                    for (let dc = -1; dc <= 1; dc++) {
+                        let nr = r + dr;
+                        let nc = c + dc;
+                        if (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE) {
+                            if (board[nr][nc] === 1) return false;
+                        }
+                    }
+                }
+            }
+            return true;
+        }
+
+        function handlePlacementClick(row, col) {
+            if (currentShipIndex >= SHIP_TYPES.length || myReady) return;
+            let size = SHIP_TYPES[currentShipIndex];
+
+            if (canPlaceShip(playerBoard, size, row, col, shipOrientation)) {
+                let shipCoords = [];
+                for (let i = 0; i < size; i++) {
+                    let r = row + (shipOrientation === 'vertical' ? i : 0);
+                    let c = col + (shipOrientation === 'horizontal' ? i : 0);
+                    playerBoard[r][c] = 1;
+                    shipCoords.push({r, c});
+                }
+                playerShips.push({size, coords: shipCoords, hits: 0});
+                currentShipIndex++;
+                renderPlacementBoard();
+                updateFleetUI();
+
+                if (currentShipIndex >= SHIP_TYPES.length) {
+                    const btn = document.getElementById('btn-start-battle');
+                    btn.disabled = false;
+                    btn.className = 'w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition shadow-lg cursor-pointer';
+                    setStatus('Весь флот расставлен! Нажмите «Готов к бою»');
+                } else {
+                    setStatus(`Расставьте ${SHIP_TYPES[currentShipIndex]}-палубный корабль`);
+                }
+            } else {
+                setStatus('Сюда нельзя поставить корабль (правило соприкосновений)!');
+            }
+        }
+
+        function autoDeploy() {
+            if (myReady) return;
+            playerBoard = makeEmptyBoard();
+            playerShips = [];
+            currentShipIndex = 0;
+
+            for (let size of SHIP_TYPES) {
+                let placed = false;
+                let attempts = 0;
+                while (!placed && attempts < 200) {
+                    attempts++;
+                    let orientation = Math.random() < 0.5 ? 'horizontal' : 'vertical';
+                    let r = Math.floor(Math.random() * BOARD_SIZE);
+                    let c = Math.floor(Math.random() * BOARD_SIZE);
+                    if (canPlaceShip(playerBoard, size, r, c, orientation)) {
+                        let shipCoords = [];
+                        for (let i = 0; i < size; i++) {
+                            let nr = r + (orientation === 'vertical' ? i : 0);
+                            let nc = c + (orientation === 'horizontal' ? i : 0);
+                            playerBoard[nr][nc] = 1;
+                            shipCoords.push({r: nr, c: nc});
+                        }
+                        playerShips.push({size, coords: shipCoords, hits: 0});
+                        placed = true;
+                    }
+                }
+            }
+            currentShipIndex = SHIP_TYPES.length;
+            renderPlacementBoard();
+            updateFleetUI();
+            
+            const btn = document.getElementById('btn-start-battle');
+            btn.disabled = false;
+            btn.className = 'w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition shadow-lg cursor-pointer';
+            setStatus('Флот расставлен случайно! Нажмите «Готов к бою»');
+        }
+
+        function resetPlacement() {
+            if (myReady) return;
+            playerBoard = makeEmptyBoard();
+            playerShips = [];
+            currentShipIndex = 0;
+            renderPlacementBoard();
+            updateFleetUI();
+            
+            const btn = document.getElementById('btn-start-battle');
+            btn.disabled = true;
+            btn.className = 'w-full py-3 bg-emerald-600/40 text-slate-400 cursor-not-allowed font-bold rounded-xl transition shadow-lg';
+            setStatus('Расставьте свой флот заново');
+        }
+
+        function updateFleetUI() {
+            for (let i = 0; i < SHIP_TYPES.length; i++) {
+                let li = document.getElementById(`fleet-${SHIP_TYPES[i]}`);
+                if (i < currentShipIndex) {
+                    li.classList.add('opacity-40', 'line-through');
+                } else if (i === currentShipIndex) {
+                    li.classList.add('border-cyan-500', 'bg-cyan-950/40');
+                    li.classList.remove('opacity-40', 'line-through');
+                } else {
+                    li.classList.remove('opacity-40', 'line-through', 'border-cyan-500', 'bg-cyan-950/40');
+                }
+            }
+        }
+
+        function finishPlacement() {
+            if (gameMode === 'pve') {
+                showScreen('screen-battle');
+                setupEnemyBot();
+                renderBattleBoards();
+                isMyTurn = true;
+                setStatus('Ваш ход! Стреляйте по полю противника');
+            } else {
+                myReady = true;
+                sendData({ type: 'ready' });
+
+                const btn = document.getElementById('btn-start-battle');
+                btn.disabled = true;
+                btn.innerText = 'Ожидание противника...';
+                btn.className = 'w-full py-3 bg-amber-600/40 text-amber-200 cursor-not-allowed font-bold rounded-xl transition shadow-lg animate-pulse';
+
+                if (enemyReady) {
+                    startPvPBattle();
+                } else {
+                    setStatus('Вы готовы! Ожидание готовности соперника...');
+                }
+            }
+        }
+
+        function startPvPBattle() {
+            showScreen('screen-battle');
+            enemyBoard = makeEmptyBoard();
+            renderBattleBoards();
+            isMyTurn = isHost;
+            setStatus(isMyTurn ? 'Оба игрока готовы! Ваш ход, стреляйте!' : 'Оба игрока готовы! Ход противника, ожидайте...');
+        }
+
+        // --- PvE Bot Logic ---
+        function setupEnemyBot() {
+            enemyBoard = makeEmptyBoard();
+            enemyShips = [];
+            for (let size of SHIP_TYPES) {
+                let placed = false;
+                while (!placed) {
+                    let orientation = Math.random() < 0.5 ? 'horizontal' : 'vertical';
+                    let r = Math.floor(Math.random() * BOARD_SIZE);
+                    let c = Math.floor(Math.random() * BOARD_SIZE);
+                    if (canPlaceShip(enemyBoard, size, r, c, orientation)) {
+                        let shipCoords = [];
+                        for (let i = 0; i < size; i++) {
+                            let nr = r + (orientation === 'vertical' ? i : 0);
+                            let nc = c + (orientation === 'horizontal' ? i : 0);
+                            enemyBoard[nr][nc] = 1; // 1 = ship alive
+                            shipCoords.push({r: nr, c: nc});
+                        }
+                        enemyShips.push({size, coords: shipCoords, hits: 0, sunk: false});
+                        placed = true;
+                    }
+                }
+            }
+        }
+
+        function renderBattleBoards() {
+            // Player board
+            const pContainer = document.getElementById('player-battle-board');
+            pContainer.innerHTML = '';
+            for (let r = 0; r < BOARD_SIZE; r++) {
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'w-7 h-7 md:w-8 md:h-8 rounded flex items-center justify-center border border-slate-700 text-xs font-bold';
+                    let val = playerBoard[r][c];
+                    if (val === 1) {
+                        cell.classList.add('bg-cyan-700');
+                    } else if (val === 2) {
+                        cell.classList.add('bg-slate-700');
+                        cell.innerText = '💧'; // промах
+                    } else if (val === 3) {
+                        cell.classList.add('bg-amber-600');
+                        cell.innerText = '🔥'; // огонь (ранен)
+                    } else if (val === 'sunk') {
+                        cell.classList.add('bg-rose-700');
+                        cell.innerText = '✕'; // полностью уничтожен (крестик)
+                    } else {
+                        cell.classList.add('bg-slate-800');
+                    }
+                    pContainer.appendChild(cell);
+                }
+            }
+
+            // Enemy board
+            const eContainer = document.getElementById('enemy-battle-board');
+            eContainer.innerHTML = '';
+            for (let r = 0; r < BOARD_SIZE; r++) {
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'w-7 h-7 md:w-8 md:h-8 rounded flex items-center justify-center border border-slate-700 cursor-pointer text-xs font-bold transition';
+                    let val = enemyBoard[r][c];
+                    if (val === 2) {
+                        cell.classList.add('bg-slate-700');
+                        cell.innerText = '💧'; // промах
+                    } else if (val === 3) {
+                        cell.classList.add('bg-amber-600');
+                        cell.innerText = '🔥'; // огонь (ранен)
+                    } else if (val === 'sunk') {
+                        cell.classList.add('bg-rose-700');
+                        cell.innerText = '✕'; // крестик (убит)
+                    } else {
+                        cell.classList.add('bg-slate-800', 'hover:bg-slate-700');
+                    }
+                    cell.dataset.row = r;
+                    cell.dataset.col = c;
+                    cell.addEventListener('click', () => handlePlayerShot(r, c));
+                    eContainer.appendChild(cell);
+                }
+            }
+        }
+
+        // Проверка, потоплен ли конкретный корабль, и превращение его ячеек в 'sunk' (✕)
+        function checkAndSinkShip(board, shipsList, r, c) {
+            for (let ship of shipsList) {
+                let match = ship.coords.some(coord => coord.r === r && coord.c === c);
+                if (match) {
+                    let allHit = ship.coords.every(coord => {
+                        let v = board[coord.r][coord.c];
+                        return v === 3 || v === 'sunk';
+                    });
+                    if (allHit && !ship.sunk) {
+                        ship.sunk = true;
+                        ship.coords.forEach(coord => {
+                            board[coord.r][coord.c] = 'sunk';
+                        });
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        function handlePlayerShot(r, c) {
+            if (!isMyTurn || gameState === 'over') return;
+            let val = enemyBoard[r][c];
+            if (val === 2 || val === 3 || val === 'sunk') return;
+
+            if (gameMode === 'pve') {
+                if (enemyBoard[r][c] === 1) {
+                    enemyBoard[r][c] = 3;
+                    let sunk = checkAndSinkShip(enemyBoard, enemyShips, r, c);
+                    if (sunk) {
+                        setStatus('Корабль противника полностью потоплен! Стреляйте еще раз');
+                    } else {
+                        setStatus('Попадание (огонь)! Стреляйте еще раз');
+                    }
+                    renderBattleBoards();
+                    checkWinConditionPvE();
+                } else {
+                    enemyBoard[r][c] = 2;
+                    isMyTurn = false;
+                    renderBattleBoards();
+                    setStatus('Промах! Ход противника...');
+                    setTimeout(botTurn, 1000);
+                }
+            } else if (gameMode === 'pvp') {
+                sendData({ type: 'shot', r, c });
+                isMyTurn = false;
+                setStatus('Вы сделали выстрел. Ход противника...');
+            }
+        }
+
+        // --- Network Data Handler for PvP ---
+        function handleNetworkData(data) {
+            if (data.type === 'ready') {
+                enemyReady = true;
+                if (myReady) {
+                    startPvPBattle();
+                } else {
+                    setStatus('Противник готов к бою! Завершите расстановку.');
+                }
+            } else if (data.type === 'shot') {
+                let r = data.r;
+                let c = data.c;
+                let hit = (playerBoard[r][c] === 1);
+                
+                if (hit) {
+                    playerBoard[r][c] = 3;
+                } else {
+                    if (playerBoard[r][c] === 0) playerBoard[r][c] = 2;
+                }
+
+                let sunk = checkAndSinkShipSimple(playerBoard, r, c);
+                
+                renderBattleBoards();
+
+                let hasAliveDecks = playerBoard.some(row => row.includes(1));
+
+                sendData({ type: 'result', r, c, hit, sunk, gameOver: !hasAliveDecks });
+
+                if (!hasAliveDecks) {
+                    showGameOverModal('Поражение!', 'Ваш флот полностью уничтожен противником.');
+                    return;
+                }
+
+                if (hit) {
+                    setStatus('Противник попал по вашему кораблю и бьет снова!');
+                    isMyTurn = false;
+                } else {
+                    setStatus('Противник промахнулся. Ваш ход!');
+                    isMyTurn = true;
+                }
+            } else if (data.type === 'result') {
+                let r = data.r;
+                let c = data.c;
+                let hit = data.hit;
+                let sunk = data.sunk;
+                
+                if (hit) {
+                    enemyBoard[r][c] = sunk ? 'sunk' : 3;
+                    renderBattleBoards();
+                    if (data.gameOver) {
+                        showGameOverModal('Победа!', 'Поздравляем! Вы полностью уничтожили флот противника!');
+                        return;
+                    }
+                    setStatus(sunk ? 'Вы потопили корабль противника! Ваш ход снова' : 'Попадание! Ваш ход снова');
+                    isMyTurn = true;
+                } else {
+                    enemyBoard[r][c] = 2;
+                    renderBattleBoards();
+                    setStatus('Промах! Ход противника...');
+                    isMyTurn = false;
+                }
+            }
+        }
+
+        function checkAndSinkShipSimple(board, startR, startC) {
+            let visited = new Set();
+            let queue = [{r: startR, c: startC}];
+            let group = [];
+            let isStandaloneSunk = true;
+
+            let idx = 0;
+            while(idx < queue.length) {
+                let curr = queue[idx++];
+                let key = `${curr.r},${curr.c}`;
+                if(visited.has(key)) continue;
+                visited.add(key);
+                group.push(curr);
+
+                [[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr, dc]) => {
+                    let nr = curr.r + dr, nc = curr.c + dc;
+                    if(nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE) {
+                        let val = board[nr][nc];
+                        if(val === 3) {
+                            queue.push({r: nr, c: nc});
+                        } else if(val === 1) {
+                            isStandaloneSunk = false;
+                        }
+                    }
+                });
+            }
+
+            if(isStandaloneSunk) {
+                group.forEach(cell => {
+                    board[cell.r][cell.c] = 'sunk';
+                });
+                return true;
+            }
+            return false;
+        }
+
+        let botTargetStack = [];
+        let botCurrentShipHits = [];
+
+        function botTurn() {
+            if (gameState === 'over') return;
+
+            let r, c;
+            if (botTargetStack.length > 0) {
+                let target = botTargetStack.pop();
+                r = target.r;
+                c = target.c;
+            } else {
+                do {
+                    r = Math.floor(Math.random() * BOARD_SIZE);
+                    c = Math.floor(Math.random() * BOARD_SIZE);
+                } while (playerBoard[r][c] === 2 || playerBoard[r][c] === 3 || playerBoard[r][c] === 'sunk');
+            }
+
+            if (playerBoard[r][c] === 1) {
+                playerBoard[r][c] = 3;
+                botCurrentShipHits.push({r, c});
+                
+                let sunk = checkAndSinkShipSimple(playerBoard, r, c);
+                if (sunk) {
+                    setStatus('Бот полностью потопил ваш корабль!');
+                    botTargetStack = [];
+                    botCurrentShipHits = [];
+                } else {
+                    setStatus('Бот попал по вашему кораблю! Он стреляет снова...');
+                    [[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr, dc]) => {
+                        let nr = r + dr, nc = c + dc;
+                        if (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE) {
+                            if (playerBoard[nr][nc] !== 2 && playerBoard[nr][nc] !== 3 && playerBoard[nr][nc] !== 'sunk') {
+                                botTargetStack.push({r: nr, c: nc});
+                            }
+                        }
+                    });
+                }
+
+                renderBattleBoards();
+                checkWinConditionPvE();
+                setTimeout(botTurn, 1000);
+            } else {
+                playerBoard[r][c] = 2;
+                isMyTurn = true;
+                renderBattleBoards();
+                setStatus('Бот промахнулся. Ваш ход!');
+            }
+        }
+
+        function checkWinConditionPvE() {
+            let enemyAlive = enemyShips.some(ship => !ship.sunk);
+            if (!enemyAlive) {
+                showGameOverModal('Победа!', 'Поздравляем! Вы полностью уничтожили флот противника!');
+                return;
+            }
+
+            let playerAlive = false;
+            for (let r = 0; r < BOARD_SIZE; r++) {
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    if (playerBoard[r][c] === 1 || playerBoard[r][c] === 3) {
+                        playerAlive = true;
+                    }
+                }
+            }
+
+            if (!playerAlive) {
+                showGameOverModal('Поражение!', 'Бот одержал победу! Ваш флот уничтожен.');
+                return;
+            }
+        }
+    </script>
+</body>
+</html>
